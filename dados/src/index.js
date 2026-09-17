@@ -260,6 +260,61 @@ async function checkBotAdmin(nazu, groupId) {
 
 global.waitPlay2 = global.waitPlay2 || {};
 const AVATAR_FALLBACK_URL = 'https://raw.githubusercontent.com/Pauloh2206/imagem_up/refs/heads/main/4.png';
+
+// Busca GIFs de anime por ação. A mídia é obtida sob demanda para evitar
+// links Catbox antigos que podem retornar 404. Se a API falhar, o comando
+// continua funcionando com texto.
+const ANIME_ACTION_CATEGORIES = {
+  chute: 'kick', chutar: 'kick',
+  tapa: 'slap', tapar: 'slap',
+  soco: 'punch', socar: 'punch',
+  beijo: 'kiss', beijar: 'kiss', beijob: 'kiss', beijarb: 'kiss', kiss: 'kiss',
+  abraco: 'hug', abracar: 'hug', hug: 'hug',
+  bater: 'slap', slap: 'slap',
+  mata: 'shoot', matar: 'shoot', atirar: 'shoot', tiro: 'shoot',
+  cafune: 'pat',
+  morder: 'bite', mordida: 'bite',
+  lamber: 'lick', lambida: 'lick',
+  explodir: 'yeet'
+};
+
+async function getAnimeActionMedia(command) {
+  const category = ANIME_ACTION_CATEGORIES[command];
+  if (!category) return null;
+  let inputPath;
+  let outputPath;
+  try {
+    const response = await axios.get(`https://nekos.best/api/v2/${category}`, {
+      timeout: 8000,
+      headers: { 'User-Agent': 'Shania-Yan-Bot/1.0 (WhatsApp bot)' }
+    });
+    const url = response.data?.results?.[0]?.url;
+    if (!url) return null;
+    const gifResponse = await axios.get(url, {
+      responseType: 'arraybuffer',
+      timeout: 20000,
+      headers: { 'User-Agent': 'Shania-Yan-Bot/1.0 (WhatsApp bot)' }
+    });
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+    const tempId = crypto.randomUUID();
+    inputPath = pathz.join(os.tmpdir(), `shania-${tempId}.gif`);
+    outputPath = pathz.join(os.tmpdir(), `shania-${tempId}.mp4`);
+    fs.writeFileSync(inputPath, Buffer.from(gifResponse.data));
+    await execAsync(`ffmpeg -hide_banner -loglevel error -i "${inputPath}" -vf "fps=15,scale=512:-2:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2" -c:v libx264 -pix_fmt yuv420p -movflags +faststart -an -y "${outputPath}"`, { timeout: 60000 });
+    const videoBuffer = fs.readFileSync(outputPath);
+    return { video: videoBuffer, mimetype: 'video/mp4' };
+  } catch (error) {
+    console.warn(`[BRINCADEIRA] Não foi possível obter mídia anime para ${command}: ${error.message}`);
+    return null;
+  } finally {
+    for (const filePath of [inputPath, outputPath]) {
+      if (filePath) {
+        try { fs.unlinkSync(filePath); } catch {}
+      }
+    }
+  }
+}
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = pathz.dirname(__filename);
 const OWNER_ONLY_MESSAGE = '🚫 Este comando é apenas para o dono do bot!';
@@ -8123,7 +8178,22 @@ if (comandosPrivados.includes(cmdSafe)) {
           `${pushname} envolveu @${target.split('@')[0]} em seus braços! 🤗💖`
         ];
         
-        return reply(actions[Math.floor(Math.random() * actions.length)], { mentions: [target] });
+        const actionText = actions[Math.floor(Math.random() * actions.length)];
+        const media = await getAnimeActionMedia(command);
+        if (media?.video) {
+          try {
+            return await nazu.sendMessage(from, {
+              video: media.video,
+              mimetype: 'video/mp4',
+              caption: actionText,
+              mentions: [target],
+              gifPlayback: true
+            }, { quoted: info });
+          } catch (mediaError) {
+            console.warn(`[RPG] Mídia indisponível em ${command}; enviando texto: ${mediaError.message}`);
+          }
+        }
+        return reply(actionText, { mentions: [target] });
         break;
       }
 
@@ -8143,7 +8213,22 @@ if (comandosPrivados.includes(cmdSafe)) {
           `${pushname} roubou um beijinho de @${target.split('@')[0]}! 😚`
         ];
         
-        return reply(actions[Math.floor(Math.random() * actions.length)], { mentions: [target] });
+        const actionText = actions[Math.floor(Math.random() * actions.length)];
+        const media = await getAnimeActionMedia(command);
+        if (media?.video) {
+          try {
+            return await nazu.sendMessage(from, {
+              video: media.video,
+              mimetype: 'video/mp4',
+              caption: actionText,
+              mentions: [target],
+              gifPlayback: true
+            }, { quoted: info });
+          } catch (mediaError) {
+            console.warn(`[RPG] Mídia indisponível em ${command}; enviando texto: ${mediaError.message}`);
+          }
+        }
+        return reply(actionText, { mentions: [target] });
         break;
       }
 
@@ -8164,7 +8249,22 @@ if (comandosPrivados.includes(cmdSafe)) {
           `SMACK! ${pushname} deu um tapão em @${target.split('@')[0]}! 😠`
         ];
         
-        return reply(actions[Math.floor(Math.random() * actions.length)], { mentions: [target] });
+        const actionText = actions[Math.floor(Math.random() * actions.length)];
+        const media = await getAnimeActionMedia(command);
+        if (media?.video) {
+          try {
+            return await nazu.sendMessage(from, {
+              video: media.video,
+              mimetype: 'video/mp4',
+              caption: actionText,
+              mentions: [target],
+              gifPlayback: true
+            }, { quoted: info });
+          } catch (mediaError) {
+            console.warn(`[RPG] Mídia indisponível em ${command}; enviando texto: ${mediaError.message}`);
+          }
+        }
+        return reply(actionText, { mentions: [target] });
         break;
       }
 
@@ -20900,26 +21000,22 @@ ${nivelSorte >= 70 ? '🎉 Hoje é seu dia de sorte!' : nivelSorte >= 40 ? '🤔
           const targetName = `@${getUserName(target)}`;
           const level = Math.floor(Math.random() * 101);
           let responses = fs.existsSync(__dirname + '/funcs/json/gamestext2.json') ? JSON.parse(fs.readFileSync(__dirname + '/funcs/json/gamestext2.json')) : {};
-          const responseText = responses[command].replaceAll('#nome#', targetName).replaceAll('#level#', level) || `📊 ${targetName} tem *${level}%* de ${command}! 🔥`;
+          const template = responses[command];
+          const responseText = template
+            ? template.replaceAll('#nome#', targetName).replaceAll('#level#', level)
+            : `📊 ${targetName} tem *${level}%* de ${command}! 🔥`;
           const media = gamesData.games[command];
-          if (media?.image) {
-            await nazu.sendMessage(from, {
-              image: media.image,
-              caption: responseText,
-              mentions: [target]
-            });
-          } else if (media?.video) {
-            await nazu.sendMessage(from, {
-              video: media.video,
-              caption: responseText,
-              mentions: [target],
-              gifPlayback: true
-            });
-          } else {
-            await nazu.sendMessage(from, {
-              text: responseText,
-              mentions: [target]
-            });
+          try {
+            if (media?.image) {
+              await nazu.sendMessage(from, { image: media.image, caption: responseText, mentions: [target] });
+            } else if (media?.video) {
+              await nazu.sendMessage(from, { video: media.video, caption: responseText, mentions: [target], gifPlayback: true });
+            } else {
+              await nazu.sendMessage(from, { text: responseText, mentions: [target] });
+            }
+          } catch (mediaError) {
+            console.warn(`[BRINCADEIRA] Mídia indisponível em ${command}; enviando texto: ${mediaError.message}`);
+            await nazu.sendMessage(from, { text: responseText, mentions: [target] });
           }
         } catch (e) {
       // DEV_LOG_INSTRUMENTED: todos os erros capturados são enviados ao Dev.
@@ -21006,24 +21102,17 @@ ${nivelSorte >= 70 ? '🎉 Hoje é seu dia de sorte!' : nivelSorte >= 40 ? '🤔
             responseText += `🏅 *#${i + 1}* - @${getUserName(m)}\n`;
           });
           let media = gamesData.ranks[cleanedCommand];
-          if (media?.image) {
-            await nazu.sendMessage(from, {
-              image: media.image,
-              caption: responseText,
-              mentions: top5
-            });
-          } else if (media?.video) {
-            await nazu.sendMessage(from, {
-              video: media.video,
-              caption: responseText,
-              mentions: top5,
-              gifPlayback: true
-            });
-          } else {
-            await nazu.sendMessage(from, {
-              text: responseText,
-              mentions: top5
-            });
+          try {
+            if (media?.image) {
+              await nazu.sendMessage(from, { image: media.image, caption: responseText, mentions: top5 });
+            } else if (media?.video) {
+              await nazu.sendMessage(from, { video: media.video, caption: responseText, mentions: top5, gifPlayback: true });
+            } else {
+              await nazu.sendMessage(from, { text: responseText, mentions: top5 });
+            }
+          } catch (mediaError) {
+            console.warn(`[RANKING] Mídia indisponível em ${command}; enviando texto: ${mediaError.message}`);
+            await nazu.sendMessage(from, { text: responseText, mentions: top5 });
           }
         } catch (e) {
       // DEV_LOG_INSTRUMENTED: todos os erros capturados são enviados ao Dev.
@@ -21108,24 +21197,17 @@ ${nivelSorte >= 70 ? '🎉 Hoje é seu dia de sorte!' : nivelSorte >= 40 ? '🤔
             responseText += `🏅 *#${i + 1}* - @${getUserName(m)}\n`;
           });
           let media = gamesData.ranks[cleanedCommand];
-          if (media?.image) {
-            await nazu.sendMessage(from, {
-              image: media.image,
-              caption: responseText,
-              mentions: top5
-            });
-          } else if (media?.video) {
-            await nazu.sendMessage(from, {
-              video: media.video,
-              caption: responseText,
-              mentions: top5,
-              gifPlayback: true
-            });
-          } else {
-            await nazu.sendMessage(from, {
-              text: responseText,
-              mentions: top5
-            });
+          try {
+            if (media?.image) {
+              await nazu.sendMessage(from, { image: media.image, caption: responseText, mentions: top5 });
+            } else if (media?.video) {
+              await nazu.sendMessage(from, { video: media.video, caption: responseText, mentions: top5, gifPlayback: true });
+            } else {
+              await nazu.sendMessage(from, { text: responseText, mentions: top5 });
+            }
+          } catch (mediaError) {
+            console.warn(`[RANKING] Mídia indisponível em ${command}; enviando texto: ${mediaError.message}`);
+            await nazu.sendMessage(from, { text: responseText, mentions: top5 });
           }
         } catch (e) {
       // DEV_LOG_INSTRUMENTED: todos os erros capturados são enviados ao Dev.
@@ -21151,6 +21233,8 @@ ${nivelSorte >= 70 ? '🎉 Hoje é seu dia de sorte!' : nivelSorte >= 40 ? '🤔
       case 'abracar':
       case 'mata':
       case 'matar':
+      case 'atirar':
+      case 'tiro':
       case 'tapar':
       case 'goza':
       case 'gozar':
@@ -21174,29 +21258,32 @@ ${nivelSorte >= 70 ? '🎉 Hoje é seu dia de sorte!' : nivelSorte >= 40 ? '🤔
           let gamesData = fs.existsSync(__dirname + '/funcs/json/games.json') ? JSON.parse(fs.readFileSync(__dirname + '/funcs/json/games.json')) : {
             games2: {}
           };
-          let GamezinData = fs.existsSync(__dirname + '/funcs/json/markgame.json') ? JSON.parse(fs.readFileSync(__dirname + '/funcs/json/markgame.json')) : {
-            ranks: {}
-          };
-          let responseText = GamezinData[command].replaceAll('#nome#', `@${getUserName(menc_os2)}`) || `Voce acabou de dar um(a) ${command} no(a) @${getUserName(menc_os2)}`;
-          let media = gamesData.games2[command];
-          if (media?.image) {
-            await nazu.sendMessage(from, {
-              image: media.image,
-              caption: responseText,
-              mentions: [menc_os2]
-            });
-          } else if (media?.video) {
-            await nazu.sendMessage(from, {
-              video: media.video,
-              caption: responseText,
-              mentions: [menc_os2],
-              gifPlayback: true
-            });
-          } else {
-            await nazu.sendMessage(from, {
-              text: responseText,
-              mentions: [menc_os2]
-            });
+          let GamezinData = fs.existsSync(__dirname + '/funcs/json/markgame.json') ? JSON.parse(fs.readFileSync(__dirname + '/funcs/json/markgame.json')) : {};
+          const template = GamezinData[command];
+          const responseText = template
+            ? template.replaceAll('#nome#', `@${getUserName(menc_os2)}`)
+            : `Você acabou de dar um(a) ${command} em @${getUserName(menc_os2)}`;
+          const animeMedia = await getAnimeActionMedia(command);
+          // Não reutiliza os vídeos Catbox antigos: eles estão retornando 404.
+          // Sem mídia anime disponível, o comando envia somente o texto.
+          let media = animeMedia;
+          try {
+            if (media?.image) {
+              await nazu.sendMessage(from, { image: media.image, caption: responseText, mentions: [menc_os2] });
+            } else if (media?.video) {
+              await nazu.sendMessage(from, {
+                video: media.video,
+                mimetype: media.mimetype || 'video/mp4',
+                caption: responseText,
+                mentions: [menc_os2],
+                gifPlayback: true
+              });
+            } else {
+              await nazu.sendMessage(from, { text: responseText, mentions: [menc_os2] });
+            }
+          } catch (mediaError) {
+            console.warn(`[BRINCADEIRA] Mídia indisponível em ${command}; enviando texto: ${mediaError.message}`);
+            await nazu.sendMessage(from, { text: responseText, mentions: [menc_os2] });
           }
         } catch (e) {
       // DEV_LOG_INSTRUMENTED: todos os erros capturados são enviados ao Dev.
