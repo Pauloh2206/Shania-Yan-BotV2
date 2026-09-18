@@ -261,6 +261,28 @@ async function checkBotAdmin(nazu, groupId) {
 global.waitPlay2 = global.waitPlay2 || {};
 const AVATAR_FALLBACK_URL = 'https://raw.githubusercontent.com/Pauloh2206/imagem_up/refs/heads/main/4.png';
 
+async function generateLocalQcImage(text, author = 'Usuário', botName = 'Shania Yan') {
+  const width = 1080;
+  const height = 1350;
+  const image = new Jimp(width, height, '#0D0D0D');
+  const titleFont = await Jimp.loadFont(Jimp.FONT_SANS_64_WHITE);
+  const bodyFont = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
+  const smallFont = await Jimp.loadFont(Jimp.FONT_SANS_16_WHITE);
+
+  image.scan(0, 0, width, height, function (x, y, idx) {
+    const ratio = y / height;
+    this.bitmap.data[idx] = Math.floor(13 + ratio * 35);
+    this.bitmap.data[idx + 1] = Math.floor(13 + ratio * 10);
+    this.bitmap.data[idx + 2] = Math.floor(13 + ratio * 45);
+  });
+
+  image.print(titleFont, 70, 70, { text: 'QUOTE', alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER, alignmentY: Jimp.VERTICAL_ALIGN_TOP }, width - 140, 90);
+  image.print(smallFont, 70, 170, { text: `@${author}`, alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER, alignmentY: Jimp.VERTICAL_ALIGN_TOP }, width - 140, 40);
+  image.print(bodyFont, 100, 350, { text: `“ ${text} ”`, alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER, alignmentY: Jimp.VERTICAL_ALIGN_TOP }, width - 200, 620);
+  image.print(smallFont, 70, height - 100, { text: botName, alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER, alignmentY: Jimp.VERTICAL_ALIGN_TOP }, width - 140, 40);
+  return image.getBufferAsync(Jimp.MIME_PNG);
+}
+
 // Busca GIFs de anime por ação. A mídia é obtida sob demanda para evitar
 // links Catbox antigos que podem retornar 404. Se a API falhar, o comando
 // continua funcionando com texto.
@@ -16516,10 +16538,17 @@ break;
 
       case 'qc': {
   try {
+    const quotedContext = info.message?.extendedTextMessage?.contextInfo;
+    const quotedMessage = quotedContext?.quotedMessage;
+    const quotedAuthor = quotedContext?.participant || (!from?.endsWith('@g.us') ? from : null);
     let texto = q && q.trim()
       ? q
-      : info.message?.extendedTextMessage?.contextInfo?.quotedMessage?.conversation ||
-        info.message?.extendedTextMessage?.contextInfo?.quotedMessage?.extendedTextMessage?.text;
+      : quotedMessage?.conversation ||
+        quotedMessage?.extendedTextMessage?.text ||
+        quotedMessage?.imageMessage?.caption ||
+        quotedMessage?.videoMessage?.caption ||
+        quotedMessage?.documentMessage?.caption ||
+        quotedMessage?.documentWithCaptionMessage?.message?.documentMessage?.caption;
 
     if (!texto) {
       return reply("❌ Falta o texto. Use /qc texto ou responda uma mensagem com /qc.");
@@ -16529,9 +16558,21 @@ break;
       return reply('❌ O texto é muito grande. Máx: 400 caracteres.');
     }
 
+    const qcAuthor = q && q.trim() ? sender : (quotedAuthor || sender);
+    let qcAuthorName = q && q.trim() ? (pushname || 'Usuário') : getUserName(qcAuthor);
+    if (!q?.trim() && from?.endsWith('@g.us') && quotedAuthor) {
+      try {
+        const metadata = await nazu.groupMetadata(from);
+        const participant = metadata.participants.find(item => idsMatch(item.id, quotedAuthor));
+        qcAuthorName = participant?.notify || participant?.name || qcAuthorName;
+      } catch (error) {
+        console.warn('[QC] Não foi possível obter o nome do autor citado:', error.message);
+      }
+    }
+
     let ppimg = 'https://telegra.ph/file/b5427ea4b8701bc47e751.jpg';
     try {
-      ppimg = await nazu.profilePictureUrl(sender, 'image');
+      ppimg = await nazu.profilePictureUrl(qcAuthor, 'image');
     } catch {}
 
     const json = {
@@ -16546,7 +16587,7 @@ break;
         avatar: true,
         from: {
           id: 1,
-          name: pushname || 'Usuário',
+          name: qcAuthorName || 'Usuário',
           photo: {
             url: ppimg
           }
@@ -16556,24 +16597,48 @@ break;
       }]
     };
 
-    const res = await axios.post(
-      'https://cognima-quote.onrender.com/generate',
-      json,
-      {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 15000
+    let res;
+    let lastError;
+    let quoteImageBuffer;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        res = await axios.post(
+          'https://cognima-quote.onrender.com/generate',
+          json,
+          {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000,
+            validateStatus: status => status >= 200 && status < 500
+          }
+        );
+        if (res.status >= 200 && res.status < 300) break;
+        lastError = new Error(`Serviço QC respondeu HTTP ${res.status}`);
+        if (res.status !== 429 && res.status < 500) break;
+      } catch (requestError) {
+        lastError = requestError;
       }
-    );
+      if (attempt < 2) {
+        const waitMs = Number(res?.headers?.['retry-after']) * 1000 || attempt * 3000;
+        await new Promise(resolve => setTimeout(resolve, Math.min(waitMs, 10000)));
+      }
+    }
 
-    if (!res.data?.result?.image) {
-      return reply('❌ Erro ao gerar a figurinha. Tente novamente.');
+    if (res?.data?.result?.image) {
+      quoteImageBuffer = Buffer.from(res.data.result.image, 'base64');
+    } else {
+      console.warn('[QC] Cognima indisponível; usando gerador local:', lastError?.message || `HTTP ${res?.status || 'sem resposta'}`);
+      try {
+        quoteImageBuffer = await generateLocalQcImage(texto, qcAuthorName || 'Usuário', nomebot);
+      } catch (localError) {
+        throw new Error(`Cognima e gerador local falharam: ${localError.message}`);
+      }
     }
 
     await sendSticker(
       nazu,
       from,
       {
-        sticker: Buffer.from(res.data.result.image, 'base64'),
+        sticker: quoteImageBuffer,
         author: ` ${pushname || ''} \n ${nomebot} \n Dono ${nomedono} `,
         packname: 'Usuario',
         type: 'image'
@@ -16589,7 +16654,7 @@ break;
         command: typeof command !== 'undefined' ? command : null
       });
     console.error("Erro no QC:", e.message);
-    await reply("❌ Ocorreu um erro interno. Tente novamente em alguns minutos.");
+    await reply(`❌ Não consegui gerar o QC agora.\n${e.message}\n\nTente novamente após alguns segundos.`);
   }
 }
 break;
