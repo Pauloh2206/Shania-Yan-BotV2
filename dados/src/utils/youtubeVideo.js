@@ -25,49 +25,56 @@ function fixCookiesFormat(filePath) {
         }
         fs.writeFileSync(filePath, newContent, 'utf8');
     } catch (e) {
-        console.error("[Utilitário de Vídeo] Erro ao formatar cookies:", e.message);
+        console.error('[Utilitário de Vídeo] Erro ao formatar cookies:', e.message);
     }
 }
 
+function shellQuote(value) {
+    return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
 export async function downloadYoutubeMp4_Fast(videoUrl) {
-    try {
-        const timestamp = Date.now();
-        const fileName = path.join(TEMP_FOLDER, `${timestamp}_fast.mp4`);
+    const timestamp = Date.now();
+    const fileName = path.join(TEMP_FOLDER, `${timestamp}_fast.mp4`);
+    const cookiesParam = fs.existsSync(COOKIES_FILE)
+        ? (() => { fixCookiesFormat(COOKIES_FILE); return `--cookies ${shellQuote(COOKIES_FILE)}`; })()
+        : '';
+    const commonArgs = [
+        cookiesParam,
+        '--no-playlist',
+        '--no-warnings',
+        '--js-runtimes', shellQuote(`node:${process.execPath}`),
+        '--remote-components', 'ejs:github',
+        '--extractor-args', shellQuote('youtube:player_client=android_embedded,web'),
+        '--merge-output-format', 'mp4',
+        '--output', shellQuote(fileName),
+        '--restrict-filenames'
+    ].filter(Boolean).join(' ');
 
-        let cookiesParam = '';
-        if (fs.existsSync(COOKIES_FILE)) {
-            fixCookiesFormat(COOKIES_FILE);
-            cookiesParam = `--cookies "${COOKIES_FILE}"`;
+    const commands = [
+        // Prefere vídeo até 720p + melhor áudio; evita exigir um MP4 único.
+        `yt-dlp --format ${shellQuote('bv*[height<=720]+ba/b[height<=720]/best')} ${commonArgs} ${shellQuote(videoUrl)}`,
+        // Fallback para vídeos que não expõem uma combinação limitada por altura.
+        `yt-dlp --format ${shellQuote('bv*+ba/best')} ${commonArgs} ${shellQuote(videoUrl)}`
+    ];
+
+    let lastError;
+    for (const command of commands) {
+        try {
+            await execPromise(command, {
+                maxBuffer: 1024 * 1024 * 100,
+                timeout: 120000
+            });
+            if (fs.existsSync(fileName) && fs.statSync(fileName).size > 0) {
+                return fileName;
+            }
+        } catch (error) {
+            lastError = error;
+            console.warn('[Utilitário de Vídeo] Tentativa de formato falhou:', error.stderr || error.message);
+            try { if (fs.existsSync(fileName)) fs.unlinkSync(fileName); } catch {}
         }
-
-        /**
-         * MOTOR DE VÍDEO BLINDADO PARA VPS (AWS/UBUNTU)
-         * - extractor-args sincronizado idêntico ao de áudio para manter consistência na AWS
-         * - Limite de 720p para garantir velocidade de download e envio estável no WhatsApp
-         */
-        const command = `yt-dlp \
-            ${cookiesParam} \
-            --no-warnings \
-            --js-runtimes "node:${process.execPath}" \
-            --remote-components ejs:github \
-            --extractor-args "youtube:player_client=android_embedded,web" \
-            -f "best[height<=720][ext=mp4]/best[ext=mp4]/best" \
-            --output "${fileName}" \
-            --restrict-filenames \
-            "${videoUrl}"`;
-
-        await execPromise(command, { 
-            maxBuffer: 1024 * 1024 * 100, 
-            timeout: 90000 
-        }); 
-
-        if (!fs.existsSync(fileName)) {
-            throw new Error("Erro: Arquivo MP4 não foi encontrado após download.");
-        }
-
-        return fileName;
-    } catch (error) {
-        console.error("ERRO NO UTILITÁRIO FAST (VÍDEO):", error.message);
-        throw error;
     }
+
+    const detail = lastError?.stderr || lastError?.message || 'formato indisponível';
+    throw new Error(`Não foi possível baixar este vídeo em MP4: ${detail}`);
 }

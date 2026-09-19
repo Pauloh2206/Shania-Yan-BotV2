@@ -1557,15 +1557,122 @@ async function NazuninhaBotExec(nazu, info, store, messagesCache, rentalExpirati
   checkLevelUp(sender, userData, levelingData, nazu, from);
   writeJsonFile(LEVELING_FILE, levelingData);
     }
+    const formatModernReply = (value) => {
+      const text = String(value ?? '').trim();
+      if (!text || text.includes('╭─') || text.includes('╭━━') || text.includes('╭┈') || text.includes('╰─')) return text;
+      const lines = text.split('\n');
+      if (text.length > 1400) return text;
+      return `╭─〔 🌸 SHANIA YAN 〕\n│ ${lines.join('\n│ ')}\n╰────────────────`;
+    };
+
+    const formatModernMenu = (value) => {
+      const lines = String(value ?? '')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .split('\n')
+        .map(line => line.replace(/^[\s╭╰┊│❁┈]+/, '').replace(/[╯╮╰╭┈─━]+$/g, '').trim())
+        .filter(line => line && !/^[-─━┈╭╰]+$/.test(line));
+      const sections = [];
+      let current = null;
+      for (const line of lines) {
+        const commandMatch = line.match(/(?:^|\s|🌸|•|⭟|▸)([/.#!][a-zá-ú0-9][a-zá-ú0-9_.-]*)/iu);
+        const isCommand = Boolean(commandMatch);
+        if (isCommand) {
+          const beforeCommand = line.slice(0, commandMatch.index).trim();
+          if (beforeCommand.includes('*')) {
+            current = { title: `▸ *${beforeCommand.replace(/[*]/g, '').trim()}*`, commands: [] };
+            sections.push(current);
+          }
+          if (!current) {
+            current = { title: '📚 *COMANDOS*', commands: [] };
+            sections.push(current);
+          }
+          const commandLine = commandMatch[1].trim();
+          if (!current.commands.includes(commandLine)) current.commands.push(commandLine);
+          continue;
+        }
+        if (line.includes('*') || /^(🎮|💬|🔥|🎯|💞|🧰|🎵|🤖|🖼️|👥|⚔️|💎|👑|📚)/u.test(line)) {
+          const title = line.replace(/[*]/g, '').trim();
+          if (title.length > 2 && !/^SHANIA YAN/i.test(title)) {
+            current = { title: `▸ *${title}*`, commands: [] };
+            sections.push(current);
+          }
+        }
+      }
+      const body = sections
+        .filter(section => section.commands.length || section.title.includes('COMANDOS'))
+        .map(section => {
+          const commandRows = [];
+          for (let i = 0; i < section.commands.length; i += 3) {
+            commandRows.push(section.commands.slice(i, i + 3).join('  •  '));
+          }
+          return `${section.title}${commandRows.length ? `\n${commandRows.join('\n')}` : ''}`;
+        })
+        .join('\n\n');
+      return `🌸 *SHANIA YAN*\n\n${body || String(value ?? '').trim()}`;
+    };
+
+    const formatCategoryMenu = (value, menuCommand, menuPrefix, query) => {
+      const lines = String(value ?? '')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .split('\n')
+        .map(line => line.replace(/^[\s╭╰┊│❁┈]+/, '').replace(/[╯╮╰╭┈─━]+$/g, '').trim())
+        .filter(line => line && !/^[-─━┈╭╰]+$/.test(line));
+      const sections = [];
+      let current = null;
+      for (const line of lines) {
+        const commandMatch = line.match(/(?:^|\s|🌸|•|⭟|▸)([/.#!][a-zá-ú0-9][a-zá-ú0-9_.-]*(?:\s+[^\n]+)?)/iu);
+        if (commandMatch) {
+          if (!current) {
+            current = { title: '📚 *COMANDOS*', commands: [] };
+            sections.push(current);
+          }
+          const commandText = commandMatch[1].replace(/[|]+$/, '').trim();
+          if (!current.commands.includes(commandText)) current.commands.push(commandText);
+        } else if (line.includes('*') || /^(🎮|💬|🔥|🎯|💞|🧰|🎵|🤖|🖼️|👥|⚔️|💎|👑|📚)/u.test(line)) {
+          const title = line.replace(/[*]/g, '').trim();
+          if (title.length > 2 && !/^SHANIA YAN/i.test(title)) {
+            current = { title: `*${title}*`, commands: [] };
+            sections.push(current);
+          }
+        }
+      }
+      const validSections = sections.filter(section => section.commands.length);
+      if (!validSections.length) return `🌸 *SHANIA YAN BOT*\n\n${lines.join('\n')}`;
+
+      const requestedPage = Math.max(1, Number.parseInt(query, 10) || 1);
+      const pageSize = 32;
+      const pages = [];
+      let page = [];
+      let count = 0;
+      for (const section of validSections) {
+        if (page.length && count + section.commands.length > pageSize) {
+          pages.push(page);
+          page = [];
+          count = 0;
+        }
+        page.push(section);
+        count += section.commands.length;
+      }
+      if (page.length) pages.push(page);
+      const pageNumber = Math.min(requestedPage, pages.length);
+      const pageSections = pages[pageNumber - 1];
+      const body = pageSections.map(section => `${section.title}\n${section.commands.map(item => `• ${item}`).join('\n')}`).join('\n\n');
+      const navigation = pages.length > 1
+        ? `\n\n📄 *Página ${pageNumber}/${pages.length}*\n${pageNumber < pages.length ? `➡️ Próxima: ${menuPrefix}${menuCommand} ${pageNumber + 1}` : '✅ Última página'}${pageNumber > 1 ? `\n⬅️ Anterior: ${menuPrefix}${menuCommand} ${pageNumber - 1}` : ''}`
+        : '';
+      return `🌸 *SHANIA YAN BOT*\n\n${body}${navigation}\n\n↩️ Use ${menuPrefix}menu para voltar`;
+    };
+
     async function reply(text, options = {}) {
       try {
         const {
           mentions = [],
           noForward = false,
-          noQuote = false
+          noQuote = false,
+          compact = false
         } = options;
         const messageContent = {
-          text: text.trim(),
+          text: compact ? String(text ?? '').trim() : formatModernReply(text),
           mentions: mentions
         };
         const sendOptions = {
@@ -4115,7 +4222,7 @@ if (comandosPrivados.includes(cmdSafe)) {
     const sendMenuImage = async (menuText, mediaBuffer) => {
       return nazu.sendMessage(
         from,
-        { image: mediaBuffer, caption: menuText },
+        { image: mediaBuffer, caption: formatCategoryMenu(menuText, command, prefix, q) },
         { quoted: info }
       );
     };
@@ -10059,10 +10166,14 @@ if (comandosPrivados.includes(cmdSafe)) {
         if (!isOwner) return reply("🚫 Apenas o Dono principal pode reiniciar o bot!");
         
         try {
-          await reply(`🔄 *REINICIANDO O BOT...*
+          await reply('🔄 Reiniciando... Avisarei quando voltar.', { compact: true });
 
-⏸️ Pausando processamento de mensagens...
-🔄 O bot voltará online em alguns segundos!`);
+          const restartNoticePath = pathz.join(process.cwd(), 'dados', 'database', 'restart-pending.json');
+          fs.writeFileSync(restartNoticePath, JSON.stringify({
+            chatId: from,
+            requestedBy: sender,
+            requestedAt: new Date().toISOString()
+          }, null, 2));
 
           // Pausa o processamento de mensagens
           const messageQueueModule = await import('./connect.js');
@@ -12039,125 +12150,65 @@ case 'video': {
     }
     break;
 }
-        case 'play2':
-case 'musica2': {
-    if (!q) return reply(`🎵 *YOUTUBE PLAYER (V2)* 🎵\n\n📝 Digite o nome da música ou link.`);
+      case 'play': {
+    if (!q) return reply(`🎵 *YOUTUBE PLAYER* 🎵\n\n📝 Digite o nome da música ou link.`);
 
     try {
         const yts = (await import('yt-search')).default;
-        
-        // 1. Reação de busca
         await nazu.sendMessage(from, { react: { text: '🔍', key: info.key } });
-        
+
         const search = await yts(q);
         const video = search.videos[0];
-        if (!video) return reply("❌ Não encontrei resultados para essa busca.");
+        if (!video) return reply('❌ Não encontrei resultados para essa busca.');
 
-        // Envia uma prévia de texto avisando que começou a baixar
-        await reply(`⏳ *Baixando áudio...*\n📌 *Música:* ${video.title}\n⏱️ *Duração:* ${video.timestamp}`);
-
-        // 2. Reação de download iniciando
         await nazu.sendMessage(from, { react: { text: '📥', key: info.key } });
-        
-        // Chama a função direto, já que o módulo foi importado globalmente no topo do arquivo
+
         const resultado = await youtubeV2Module.download(video.url, video.title);
-
-        if (resultado.ok) {
-            // 3. Reação de sucesso e envio do arquivo
-            await nazu.sendMessage(from, { react: { text: '🎵', key: info.key } });
-            
-            await nazu.sendMessage(from, { 
-                audio: resultado.buffer, 
-                mimetype: 'audio/mpeg',
-                fileName: `${video.title}.mp3`
-            }, { quoted: info });
-
-        } else {
+        if (!resultado.ok) {
             await nazu.sendMessage(from, { react: { text: '❌', key: info.key } });
-            await enviarErroParaDev('case-play2-download', new Error(resultado.msg || 'Falha sem mensagem no download'), {
-                command,
-                body,
-                from,
-                sender,
-                msgId
-            });
-            await reply(`❌ ${resultado.msg}`);
+            await enviarErroParaDev('case-play-download', new Error(resultado.msg || 'Falha sem mensagem no download'), { command, body, from, sender, msgId });
+            return reply(`❌ ${resultado.msg}`);
         }
 
-    } catch (error) {
-      // DEV_LOG_INSTRUMENTED: todos os erros capturados são enviados ao Dev.
-      void enviarErroParaDev('captura-local', error, {
-        msgId,
-        from,
-        command: typeof command !== 'undefined' ? command : null
-      });
-        console.error("Erro Play2 Direto:", error);
-        await enviarErroParaDev('case-play2', error, {
-            command,
-            body,
-            from,
-            sender,
-            msgId
-        });
-        await reply(`❌ Erro inesperado ao processar o player.`);
-    }
-break;
-}
-case 'play': {
-    try {
-        if (!q) {
-            await nazu.sendMessage(from, { react: { text: '❓', key: info.key } }); 
-            return reply(`🎵 Digite o nome da música ou cole o link.`);
+        // Baixa a capa para uma apresentação simples e compatível.
+        let thumbnailBuffer = null;
+        try {
+            if (video.thumbnail) {
+                const thumbnail = await axios.get(video.thumbnail, {
+                    responseType: 'arraybuffer',
+                    timeout: 10000,
+                    maxContentLength: 8 * 1024 * 1024
+                });
+                thumbnailBuffer = Buffer.from(thumbnail.data);
+            }
+        } catch (thumbnailError) {
+            console.warn('[PLAY] Capa indisponível; enviando somente o áudio:', thumbnailError.message);
         }
 
-        // 1. REAÇÃO DE BUSCA E DOWNLOAD
-        await nazu.sendMessage(from, { react: { text: '🔍', key: info.key } });
-
-        // CAMINHO CORRIGIDO: Como o index.js está em src/, precisamos entrar em funcs/utils/api.js
-        const { downloadMusic } = await import('./funcs/utils/api.js');
-
-        // Chama a função passando o link ou nome digitado no WhatsApp
-        const resultado = await downloadMusic(q);
-
-        // Se a API falhar no download ou busca
-        if (!resultado.success) {
-            await nazu.sendMessage(from, { react: { text: '❌', key: info.key } });
-            return reply(`❌ Não foi possível encontrar ou baixar a música.`);
+        if (thumbnailBuffer) {
+            try {
+                const title = String(video.title || 'Música').replace(/\s+/g, ' ').trim();
+                const author = String(video.author?.name || 'YouTube').replace(/\s+/g, ' ').trim();
+                await nazu.sendMessage(from, {
+                    image: thumbnailBuffer,
+                    caption: `🎵 *${title}*\n👤 ${author}\n⏱️ ${video.timestamp || 'Duração desconhecida'}`
+                }, { quoted: info });
+            } catch (coverError) {
+                console.warn('[PLAY] Não foi possível enviar a capa; continuando com o áudio:', coverError.message);
+            }
         }
 
-        // 2. REAÇÃO DE ENVIO
-        await nazu.sendMessage(from, { react: { text: '🚀', key: info.key } });
-
-        // Envia uma mensagem rápida com o nome do arquivo que foi gerado
-        await reply(`📝 *Baixado com sucesso:* ${resultado.filename}`);
-
-        // --- ENVIA O ÁUDIO DIRETAMENTE USANDO O BUFFER GERADO PELA API ---
-        await nazu.sendMessage(from, { 
-            audio: resultado.audioBuffer, // Passa o buffer binário puro da música
-            mimetype: 'audio/mpeg', 
-            ptt: false
+        await nazu.sendMessage(from, { react: { text: '🎵', key: info.key } });
+        await nazu.sendMessage(from, {
+            audio: resultado.buffer,
+            mimetype: 'audio/mpeg',
+            fileName: `${video.title}.mp3`
         }, { quoted: info });
-        
-        // 3. REAÇÃO DE SUCESSO
-        await nazu.sendMessage(from, { react: { text: '✅', key: info.key } });
-        
     } catch (error) {
-      // DEV_LOG_INSTRUMENTED: todos os erros capturados são enviados ao Dev.
-      void enviarErroParaDev('captura-local', error, {
-        msgId,
-        from,
-        command: typeof command !== 'undefined' ? command : null
-      });
-        console.error('Erro no comando play com a nova API:', error.message);
-        await enviarErroParaDev('case-play', error, {
-            command,
-            body,
-            from,
-            sender,
-            msgId
-        });
-        await nazu.sendMessage(from, { react: { text: '❌', key: info.key } });
-        reply("❌ Erro ao processar ou enviar a música.");
+        void enviarErroParaDev('captura-local', error, { msgId, from, command: typeof command !== 'undefined' ? command : null });
+        console.error('Erro Play Direto:', error);
+        await enviarErroParaDev('case-play', error, { command, body, from, sender, msgId });
+        await reply('❌ Erro inesperado ao processar o player.');
     }
     break;
 }
@@ -12216,9 +12267,9 @@ case 'comandos':
        
 	        await nazu.sendMessage(
 	            from,
-	            useVideo
-	                ? { video: mediaBuffer, caption: menuText }
-	                : { image: mediaBuffer, caption: menuText },
+                    useVideo
+                        ? { video: mediaBuffer, caption: menuText }
+                        : { image: mediaBuffer, caption: menuText },
 	            { quoted: info }
 	        );
 	        debugLog('Case menu: mensagem enviada', { from, msgId });

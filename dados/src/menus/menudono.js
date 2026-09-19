@@ -144,8 +144,6 @@ ${middleBorder}
 	${middleBorder}${menuItemIcon}${prefix}listsubbots
 	${middleBorder}${menuItemIcon}${prefix}listsubdonos
 	${middleBorder}${menuItemIcon}${prefix}listvipcommands
-	${middleBorder}${menuItemIcon}${prefix}mediamenu
-	${middleBorder}${menuItemIcon}${prefix}midiamenu
 	${middleBorder}${menuItemIcon}${prefix}minmessage
 	${middleBorder}${menuItemIcon}${prefix}modoaluguel
 	${middleBorder}${menuItemIcon}${prefix}msgboton
@@ -223,7 +221,6 @@ ${middleBorder}
 	${middleBorder}${menuItemIcon}${prefix}update
 	${middleBorder}${menuItemIcon}${prefix}updates
 	${middleBorder}${menuItemIcon}${prefix}verdesign
-	${middleBorder}${menuItemIcon}${prefix}videomenu
 	${middleBorder}${menuItemIcon}${prefix}viewmsg
 	${middleBorder}${menuItemIcon}${prefix}vipstats
 	${middleBorder}${menuItemIcon}${prefix}whitelistlista

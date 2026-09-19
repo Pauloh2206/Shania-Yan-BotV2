@@ -23,9 +23,7 @@ ${middleBorder}
 	${middleBorder}${menuItemIcon}${prefix}apagalembrete
 	${middleBorder}${menuItemIcon}${prefix}clima
 	${middleBorder}${menuItemIcon}${prefix}encurtalink
-	${middleBorder}${menuItemIcon}${prefix}gerarlink
 	${middleBorder}${menuItemIcon}${prefix}gerarnick
-	${middleBorder}${menuItemIcon}${prefix}imgpralink
 	${middleBorder}${menuItemIcon}${prefix}lembrar
 	${middleBorder}${menuItemIcon}${prefix}lembrete
 	${middleBorder}${menuItemIcon}${prefix}listalembretes
@@ -38,7 +36,6 @@ ${middleBorder}
 	${middleBorder}${menuItemIcon}${prefix}ssweb
 	${middleBorder}${menuItemIcon}${prefix}tinyurl
 	${middleBorder}${menuItemIcon}${prefix}upload
-	${middleBorder}${menuItemIcon}${prefix}videopralink
 	${middleBorder}${menuItemIcon}${prefix}wikipedia
 ${bottomBorder}
 `;

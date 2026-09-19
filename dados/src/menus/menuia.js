@@ -16,9 +16,7 @@ ${formattedHeader}
 
 ${menuTopBorder}${separatorIcon} *${chatBotMenuTitle}*
 ${middleBorder}
-	${middleBorder}${menuItemIcon}${prefix}apikeyinfo
 	${middleBorder}${menuItemIcon}${prefix}iaclear
-	${middleBorder}${menuItemIcon}${prefix}iastatus
 	${middleBorder}${menuItemIcon}${prefix}limparhist
 ${bottomBorder}
 `;

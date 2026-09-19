@@ -32,12 +32,12 @@
     },
     {
       "id": "26629048918042@lid",
-      "msg": 68,
+      "msg": 72,
       "cmd": 5,
       "figu": 12,
       "pushname": "Mendezz",
       "firstSeen": "2025-11-09T11:04:47.801Z",
-      "lastActivity": "2026-09-15T14:59:06.461Z"
+      "lastActivity": "2026-09-19T12:49:31.539Z"
     },
     {
       "id": "264922910949614@lid",
@@ -59,12 +59,12 @@
     },
     {
       "id": "241390751596744@lid",
-      "msg": 25,
-      "cmd": 32,
-      "figu": 4,
+      "msg": 30,
+      "cmd": 40,
+      "figu": 6,
       "pushname": "Paulo",
       "firstSeen": "2026-06-07T16:22:51.512Z",
-      "lastActivity": "2026-09-15T15:30:16.593Z"
+      "lastActivity": "2026-09-19T12:59:04.856Z"
     }
   ],
   "antibtn": false,

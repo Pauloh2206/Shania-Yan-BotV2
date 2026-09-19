@@ -117,7 +117,6 @@ ${middleBorder}
 	${middleBorder}${menuItemIcon}${prefix}status
 	${middleBorder}${menuItemIcon}${prefix}statusbot
 	${middleBorder}${menuItemIcon}${prefix}statusgp
-	${middleBorder}${menuItemIcon}${prefix}statusia
 	${middleBorder}${menuItemIcon}${prefix}stickermenu
 	${middleBorder}${menuItemIcon}${prefix}style
 	${middleBorder}${menuItemIcon}${prefix}tools
@@ -127,7 +126,6 @@ ${middleBorder}
 	${middleBorder}${menuItemIcon}${prefix}totalcmd
 	${middleBorder}${menuItemIcon}${prefix}totalcomando
 	${middleBorder}${menuItemIcon}${prefix}unblockuser
-	${middleBorder}${menuItemIcon}${prefix}viaja nte
 	${middleBorder}${menuItemIcon}${prefix}voltei
 	${middleBorder}${menuItemIcon}${prefix}welcome
 ${bottomBorder}

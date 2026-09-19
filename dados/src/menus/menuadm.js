@@ -144,7 +144,6 @@ ${middleBorder}
 	${middleBorder}${menuItemIcon}${prefix}unblacklist
 	${middleBorder}${menuItemIcon}${prefix}unblockcmd
 	${middleBorder}${menuItemIcon}${prefix}unmute
-	${middleBorder}${menuItemIcon}${prefix}welcomeimg
 	${middleBorder}${menuItemIcon}${prefix}welcomemsg
 	${middleBorder}${menuItemIcon}${prefix}x9
 ${bottomBorder}

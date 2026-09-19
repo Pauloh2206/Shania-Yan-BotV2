@@ -21,11 +21,8 @@ ${menuTopBorder}${separatorIcon} *${searchMenuTitle}*
 ${middleBorder}
 	${middleBorder}${menuItemIcon}${prefix}letra
 	${middleBorder}${menuItemIcon}${prefix}lyrics
-	${middleBorder}${menuItemIcon}${prefix}musica
 	${middleBorder}${menuItemIcon}${prefix}play
 	${middleBorder}${menuItemIcon}${prefix}playvid
-	${middleBorder}${menuItemIcon}${prefix}ytmp3
-	${middleBorder}${menuItemIcon}${prefix}ytmp4
 ${bottomBorder}
 `;
 }

@@ -1237,6 +1237,24 @@ async function createBotSocket(authDir) {
                 
                 attachMessagesListener();
                 startCacheCleanup(); // Inicia o sistema de limpeza de cache
+
+                // Confirma no WhatsApp quando um reinício solicitado por comando terminou.
+                const restartNoticePath = path.join(DATABASE_DIR, 'restart-pending.json');
+                try {
+                    const notice = JSON.parse(await fsPromises.readFile(restartNoticePath, 'utf8'));
+                    if (notice?.chatId) {
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                        await NazunaSock.sendMessage(notice.chatId, {
+                            text: '✅ Bot reiniciado e online!'
+                        });
+                        await fsPromises.unlink(restartNoticePath);
+                        console.log(`✅ Confirmação de reinício enviada para ${notice.chatId}`);
+                    }
+                } catch (restartNoticeError) {
+                    if (restartNoticeError.code !== 'ENOENT') {
+                        console.error('⚠️ Não foi possível processar a confirmação de reinício:', restartNoticeError.message);
+                    }
+                }
                 
                 // Envia mensagem de boas-vindas para o dono
                 try {
