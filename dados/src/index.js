@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getForcaIA, renderForca } from './utils/forca.js';
 import { getQuizIA } from './utils/quiz.js';
 import { youtubeV2Module } from './utils/youtube_v2.js';
+import { runFullDiagnostic } from './utils/fullDiagnostic.js';
 import { autoWarnUser } from './utils/autoWarn.js';
 import { downloadYoutubeMp4_Fast } from './utils/youtubeVideo.js';
 import Jimp from 'jimp';
@@ -11516,6 +11517,34 @@ if (comandosPrivados.includes(cmdSafe)) {
         }
         break;
 
+      case 'diagnosticofull':
+      case 'diagnosticocompleto':
+      case 'testetudo':
+      case 'healthcheck': {
+        if (!isOwner && !isSubOwner) return reply('🚫 Apenas o dono ou subdono pode executar o diagnóstico completo.');
+        await reply('🩺 Iniciando diagnóstico completo seguro. Aguarde...');
+        try {
+          const diagnostico = await runFullDiagnostic({ rootDir: process.cwd(), connection: nazu });
+          const devJid = config?.devLogs?.jid || config?.numerodono;
+          if (devJid) {
+            const arquivo = Buffer.from(diagnostico.text, 'utf8');
+            await nazu.sendMessage(devJid, {
+              document: arquivo,
+              mimetype: 'text/plain',
+              fileName: `diagnostico-${Date.now()}.txt`,
+              caption: `🩺 Diagnóstico completo: ${diagnostico.summary}`
+            });
+          }
+          const icon = diagnostico.failures ? '❌' : diagnostico.warnings ? '⚠️' : '✅';
+          await reply(`${icon} *Diagnóstico concluído*\n\n${diagnostico.summary}\n\n❌ Falhas: ${diagnostico.failures}\n⚠️ Avisos: ${diagnostico.warnings}\n⏱️ Duração: ${diagnostico.durationMs} ms\n\n📄 O relatório completo foi enviado ao Dev.`);
+        } catch (error) {
+          void enviarErroParaDev('diagnosticofull', error, { command, body, from, sender, msgId });
+          console.error('Erro no diagnóstico completo:', error);
+          await reply(`❌ Não foi possível concluir o diagnóstico: ${error.message}`);
+        }
+        break;
+      }
+
       case 'testcmd':
       case 'testarcmd':
         try {
@@ -12147,6 +12176,66 @@ case 'video': {
         command: typeof command !== 'undefined' ? command : null
       });}
         }
+    }
+    break;
+}
+      case 'playfast': {
+    if (!q) return reply(`⚡ *PLAYFAST* ⚡\n\n📝 Digite o nome da música ou link do YouTube.`);
+
+    try {
+        const yts = (await import('yt-search')).default;
+        await nazu.sendMessage(from, { react: { text: '🔍', key: info.key } });
+
+        const search = await yts(q);
+        const video = search.videos[0];
+        if (!video) return reply('❌ Não encontrei resultados para essa busca.');
+
+        await nazu.sendMessage(from, { react: { text: '📥', key: info.key } });
+        const resultado = await youtubeFastModule.download(video.url, video.title);
+        if (!resultado.ok) {
+            await nazu.sendMessage(from, { react: { text: '❌', key: info.key } });
+            await enviarErroParaDev('case-playfast-download', new Error(resultado.msg || 'Falha sem mensagem no download'), { command, body, from, sender, msgId });
+            return reply(`❌ ${resultado.msg}`);
+        }
+
+        let thumbnailBuffer = null;
+        try {
+            if (video.thumbnail) {
+                const thumbnail = await axios.get(video.thumbnail, {
+                    responseType: 'arraybuffer',
+                    timeout: 10000,
+                    maxContentLength: 8 * 1024 * 1024
+                });
+                thumbnailBuffer = Buffer.from(thumbnail.data);
+            }
+        } catch (thumbnailError) {
+            console.warn('[PLAYFAST] Capa indisponível; enviando somente o áudio:', thumbnailError.message);
+        }
+
+        if (thumbnailBuffer) {
+            try {
+                const title = String(video.title || 'Música').replace(/\s+/g, ' ').trim();
+                const author = String(video.author?.name || 'YouTube').replace(/\s+/g, ' ').trim();
+                await nazu.sendMessage(from, {
+                    image: thumbnailBuffer,
+                    caption: `⚡ *PLAYFAST*\n🎵 *${title}*\n👤 ${author}\n⏱️ ${video.timestamp || 'Duração desconhecida'}`
+                }, { quoted: info });
+            } catch (coverError) {
+                console.warn('[PLAYFAST] Não foi possível enviar a capa; continuando com o áudio:', coverError.message);
+            }
+        }
+
+        await nazu.sendMessage(from, { react: { text: '🎵', key: info.key } });
+        await nazu.sendMessage(from, {
+            audio: resultado.buffer,
+            mimetype: 'audio/mpeg',
+            fileName: `${video.title}.mp3`
+        }, { quoted: info });
+    } catch (error) {
+        void enviarErroParaDev('captura-local', error, { msgId, from, command: typeof command !== 'undefined' ? command : null });
+        console.error('Erro PlayFast:', error);
+        await enviarErroParaDev('case-playfast', error, { command, body, from, sender, msgId });
+        await reply('❌ Erro inesperado ao processar o PlayFast.');
     }
     break;
 }
