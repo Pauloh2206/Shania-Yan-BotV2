@@ -17038,6 +17038,141 @@ break;
           console.error(e);
         }
         break;
+      case 'scs': {
+        let scsTempDir;
+        const runScsProcess = (binary, args, timeoutMs = 90000) => new Promise((resolve, reject) => {
+          const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+          let stdout = '';
+          let stderr = '';
+          let timedOut = false;
+          const timer = setTimeout(() => {
+            timedOut = true;
+            child.kill('SIGKILL');
+          }, timeoutMs);
+          child.stdout.on('data', chunk => {
+            if (stdout.length < 12000) stdout += chunk.toString();
+          });
+          child.stderr.on('data', chunk => {
+            if (stderr.length < 12000) stderr += chunk.toString();
+          });
+          child.on('error', error => {
+            clearTimeout(timer);
+            reject(error);
+          });
+          child.on('close', code => {
+            clearTimeout(timer);
+            if (timedOut) return reject(new Error(`${binary} excedeu o limite de tempo`));
+            if (code !== 0) return reject(new Error(`${binary} encerrou com código ${code}: ${stderr.slice(-1200)}`));
+            resolve(stdout.trim());
+          });
+        });
+        try {
+          const userJid = nazu.user?.id || '';
+          if (typeof nazu.waUploadToServer !== 'function' || typeof nazu.relayMessage !== 'function') {
+            return reply('❌ Esta conexão não expõe as funções de upload/relay necessárias para o teste SCS.');
+          }
+
+          // Confirma localmente que o patch do WAProto está aplicado, sem enviar a mensagem de teste.
+          const scsProbe = generateWAMessageFromContent(from, {
+            audioStickerMessage: { message: { conversation: 'scs-probe' } }
+          }, { userJid });
+          if (scsProbe.message?.audioStickerMessage?.message?.conversation !== 'scs-probe') {
+            return reply('❌ A ativação automática do SCS falhou. Confira o aviso de inicialização do bot e mantenha scs-wa-proto-patch.mjs na pasta principal.');
+          }
+
+          const scsQuoted = info.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+          const unwrapScsMessage = message => message?.ephemeralMessage?.message ||
+            message?.viewOnceMessageV2?.message ||
+            message?.viewOnceMessage?.message ||
+            message?.documentWithCaptionMessage?.message || message;
+          const scsVideo = unwrapScsMessage(scsQuoted)?.videoMessage || unwrapScsMessage(info.message)?.videoMessage;
+          if (!scsVideo) {
+            return reply(`Marque/responda a um vídeo que tenha áudio e envie ${prefix}scs. O teste corta os primeiros 10 segundos.`);
+          }
+          if (Number(scsVideo.fileLength || 0) > 25 * 1024 * 1024) {
+            return reply('❌ Para manter o teste leve no Termux, use um vídeo de até 25 MB.');
+          }
+
+          const sourceBuffer = await getFileBuffer(scsVideo, 'video');
+          if (!sourceBuffer?.length) return reply('❌ Não consegui baixar o vídeo citado.');
+          if (sourceBuffer.length > 25 * 1024 * 1024) {
+            return reply('❌ O vídeo passa de 25 MB; use um arquivo menor para este teste.');
+          }
+
+          scsTempDir = pathz.join(os.tmpdir(), `shania-scs-${crypto.randomUUID()}`);
+          fs.mkdirSync(scsTempDir, { recursive: true });
+          const inputPath = pathz.join(scsTempDir, 'input.mp4');
+          const stickerPath = pathz.join(scsTempDir, 'sticker.webp');
+          const audioPath = pathz.join(scsTempDir, 'audio.ogg');
+          fs.writeFileSync(inputPath, sourceBuffer);
+
+          const audioTrack = await runScsProcess('ffprobe', [
+            '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_type',
+            '-of', 'default=noprint_wrappers=1:nokey=1', inputPath
+          ], 20000);
+          if (!audioTrack) return reply('❌ O vídeo não tem uma faixa de áudio. Use um vídeo com som.');
+
+          await runScsProcess('ffmpeg', [
+            '-hide_banner', '-loglevel', 'error', '-y', '-i', inputPath, '-t', '10',
+            '-vf', 'fps=12,scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=white',
+            '-an', '-c:v', 'libwebp', '-loop', '0', '-q:v', '55', '-compression_level', '4',
+            '-threads', '1', stickerPath
+          ]);
+          await runScsProcess('ffmpeg', [
+            '-hide_banner', '-loglevel', 'error', '-y', '-i', inputPath, '-t', '10', '-vn',
+            '-map', '0:a:0', '-ac', '1', '-ar', '48000', '-c:a', 'libopus', '-b:a', '48k',
+            '-application', 'audio', '-threads', '1', '-f', 'ogg', audioPath
+          ]);
+
+          const uploadOptions = () => ({
+            upload: nazu.waUploadToServer,
+            userJid,
+            mediaUploadTimeoutMs: 120000
+          });
+          const stickerPrepared = await generateWAMessage(from, {
+            sticker: fs.readFileSync(stickerPath),
+            mimetype: 'image/webp',
+            isAnimated: true
+          }, uploadOptions());
+          const audioPrepared = await generateWAMessage(from, {
+            audio: fs.readFileSync(audioPath),
+            mimetype: 'audio/ogg; codecs=opus',
+            ptt: true
+          }, uploadOptions());
+
+          const stickerMessage = stickerPrepared.message?.stickerMessage;
+          const audioMessage = audioPrepared.message?.audioMessage;
+          if (!stickerMessage || !audioMessage) throw new Error('Baileys não produziu os metadados de sticker/áudio esperados.');
+
+          const scsOutgoing = generateWAMessageFromContent(from, {
+            audioStickerMessage: {
+              message: {
+                stickerMessage: {
+                  ...stickerMessage,
+                  audioMessage: { ...audioMessage, ptt: false }
+                }
+              }
+            }
+          }, { userJid });
+          if (!scsOutgoing.message?.audioStickerMessage?.message?.stickerMessage?.audioMessage) {
+            throw new Error('O wrapper SCS foi descartado antes do envio.');
+          }
+
+          // Um único relay: o sticker e o áudio seguem dentro da mesma mensagem protobuf.
+          await nazu.relayMessage(from, scsOutgoing.message, { messageId: scsOutgoing.key.id });
+        } catch (e) {
+          void enviarErroParaDev('scs-audio-sticker', e, { msgId, from, command });
+          console.error('[SCS] Falha no teste de figurinha sonora nativa:', e);
+          await reply('❌ O teste SCS falhou. Confirme FFmpeg com libwebp/libopus, conexão e log do terminal.');
+        } finally {
+          if (scsTempDir) {
+            try { fs.rmSync(scsTempDir, { recursive: true, force: true }); } catch (cleanupError) {
+              console.warn('[SCS] Não consegui remover a pasta temporária:', cleanupError.message);
+            }
+          }
+        }
+        break;
+      }
       case 'st':
       case 'stk':
       case 'sticker':

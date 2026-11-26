@@ -12,6 +12,7 @@ const NODE_MODULES_PATH = path.join(process.cwd(), 'node_modules');
 const QR_CODE_DIR = path.join(process.cwd(), 'dados', 'database', 'qr-code');
 const AUTH_CREDS_FILE = path.join(QR_CODE_DIR, 'creds.json');
 const CONNECT_FILE = path.join(process.cwd(), 'dados', 'src', 'connect.js');
+const SCS_PATCH_FILE = path.join(process.cwd(), 'scs-wa-proto-patch.mjs');
 const isWindows = os.platform() === 'win32';
 const isTermux = fsSync.existsSync('/data/data/com.termux');
 
@@ -180,6 +181,36 @@ async function checkPrerequisites() {
   }
 }
 
+async function applySCSProtoPatchAutomatically() {
+  if (process.env.SCS_DISABLE_PROTO_PATCH === '1') {
+    info('🔊 Aplicação automática do patch SCS desativada pela variável SCS_DISABLE_PROTO_PATCH.');
+    return;
+  }
+  if (!fsSync.existsSync(SCS_PATCH_FILE)) {
+    aviso('⚠️ scs-wa-proto-patch.mjs não encontrado na pasta principal; o comando scs ficará desabilitado.');
+    return;
+  }
+
+  try {
+    await new Promise((resolve, reject) => {
+      const patchProcess = spawn(process.execPath, [SCS_PATCH_FILE, '--apply'], {
+        cwd: process.cwd(),
+        stdio: 'inherit',
+        env: process.env,
+      });
+      patchProcess.once('error', reject);
+      patchProcess.once('close', code => {
+        if (code === 0) resolve();
+        else reject(new Error(`patcher encerrou com código ${code}`));
+      });
+    });
+    mensagem('✅ Patch experimental SCS preparado antes de iniciar o Baileys.');
+  } catch (error) {
+    aviso(`⚠️ Não consegui aplicar o patch SCS automaticamente: ${error.message}`);
+    aviso('🤖 O bot continuará iniciando; somente o comando scs dependerá deste patch.');
+  }
+}
+
 function startBot(codeMode = false) {
   const args = ['--expose-gc', CONNECT_FILE];
   if (codeMode) args.push('--code');
@@ -277,6 +308,7 @@ async function main() {
     setupGracefulShutdown();
     await displayHeader();
     await checkPrerequisites();
+    await applySCSProtoPatchAutomatically();
     await setupTermuxAutostart();
 
     if (await hasSavedAuthState()) {
