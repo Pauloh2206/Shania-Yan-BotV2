@@ -418,6 +418,26 @@ try {
 }
 const botVersion = packageJson.version;
 const reportedDevErrors = new WeakSet();
+const normalizedGroupParticipantsCache = new Map();
+const normalizedGroupParticipantsInFlight = new Map();
+const groupMetadataInvalidationSockets = new WeakSet();
+
+function attachGroupMetadataInvalidation(nazu) {
+  if (!nazu?.ev || groupMetadataInvalidationSockets.has(nazu)) return;
+  groupMetadataInvalidationSockets.add(nazu);
+  const invalidate = (groupId) => {
+    if (!groupId) return;
+    normalizedGroupParticipantsCache.delete(groupId);
+    normalizedGroupParticipantsInFlight.delete(groupId);
+    void initializePerformanceOptimizer().then(optimizer => {
+      optimizer?.modules?.cacheManager?.del('indexGroupMeta', groupId);
+    }).catch(() => {});
+  };
+  nazu.ev.on('groups.update', updates => {
+    for (const update of updates || []) invalidate(update?.id);
+  });
+  nazu.ev.on('group-participants.update', update => invalidate(update?.id));
+}
 
 // Inicializa o cache JID→LID
 initJidLidCache(JID_LID_CACHE_FILE);
@@ -489,6 +509,7 @@ async function NazuninhaBotExec(nazu, info, store, messagesCache, rentalExpirati
   
   async function getCachedGroupMetadata(groupId) {
     try {
+      attachGroupMetadataInvalidation(nazu);
       const optimizer = await initializePerformanceOptimizer();
       if (optimizer?.modules?.cacheManager) {
         const cached = await optimizer.modules.cacheManager.getIndexGroupMeta(groupId);
@@ -1173,17 +1194,66 @@ async function NazuninhaBotExec(nazu, info, store, messagesCache, rentalExpirati
       return n.replace(/[^a-zA-Z0-9 ]/g, '').trim().toLowerCase();
     }
 
-    // Extrai IDs dos membros (pode estar em JID)
-    const rawMembers = !isGroup ? [] :
-      groupMetadata.participants?.map(extractParticipantId).filter(Boolean) || [];
-    
-    // Extrai IDs dos admins (pode estar em JID)
-    const rawAdmins = !isGroup ? [] :
-      groupMetadata.participants?.filter(p => p.admin === 'admin' || p.admin === 'superadmin').map(extractParticipantId).filter(Boolean) || [];
+    // Normaliza a lista só quando a composição/função dos membros muda.
+    // Antes, cada mensagem podia consultar onWhatsApp para todos os membros.
+    const participants = !isGroup || !Array.isArray(groupMetadata.participants)
+      ? []
+      : groupMetadata.participants;
+    const participantFingerprint = participants
+      .map(p => `${p?.id || ''}|${p?.lid || ''}|${p?.admin || ''}`)
+      .sort()
+      .join('\n');
+    let normalizedParticipants = isGroup ? normalizedGroupParticipantsCache.get(from) : null;
+    if (!isGroup) {
+      normalizedParticipants = { fingerprint: participantFingerprint, members: [], admins: [] };
+    } else if (!normalizedParticipants || normalizedParticipants.fingerprint !== participantFingerprint) {
+      const pendingNormalization = normalizedGroupParticipantsInFlight.get(from);
+      if (pendingNormalization?.fingerprint === participantFingerprint) {
+        normalizedParticipants = await pendingNormalization.promise;
+      } else {
+        let normalizationPromise;
+        normalizationPromise = (async () => {
+          const rawMembers = participants.map(extractParticipantId).filter(Boolean);
+          const rawAdmins = participants
+            .filter(p => p.admin === 'admin' || p.admin === 'superadmin')
+            .map(extractParticipantId)
+            .filter(Boolean);
+          const uniqueIds = [...new Set([...rawMembers, ...rawAdmins])];
+          const convertedIds = await convertIdsToLid(nazu, uniqueIds);
+          const convertedById = new Map(uniqueIds.map((id, index) => [id, convertedIds[index] || id]));
+          const result = {
+            fingerprint: participantFingerprint,
+            members: rawMembers.map(id => convertedById.get(id) || id),
+            admins: rawAdmins.map(id => convertedById.get(id) || id)
+          };
 
-    // Converte todos os membros e admins para LID (usando cache)
-    const AllgroupMembers = await convertIdsToLid(nazu, rawMembers);
-    const groupAdmins = await convertIdsToLid(nazu, rawAdmins);
+          // Só publica o cache se este ainda for o pedido ativo. Uma alteração
+          // de participantes invalida a entrada e impede gravar uma lista velha.
+          if (normalizedGroupParticipantsInFlight.get(from)?.promise === normalizationPromise) {
+            normalizedGroupParticipantsCache.set(from, result);
+            if (normalizedGroupParticipantsCache.size > 500) {
+              const oldestGroupId = normalizedGroupParticipantsCache.keys().next().value;
+              normalizedGroupParticipantsCache.delete(oldestGroupId);
+            }
+          }
+          return result;
+        })();
+
+        normalizedGroupParticipantsInFlight.set(from, {
+          fingerprint: participantFingerprint,
+          promise: normalizationPromise
+        });
+        try {
+          normalizedParticipants = await normalizationPromise;
+        } finally {
+          if (normalizedGroupParticipantsInFlight.get(from)?.promise === normalizationPromise) {
+            normalizedGroupParticipantsInFlight.delete(from);
+          }
+        }
+      }
+    }
+    const AllgroupMembers = normalizedParticipants.members;
+    const groupAdmins = normalizedParticipants.admins;
     
     // Debug log
     debugLog('Membros e Admins convertidos:', {
@@ -12908,40 +12978,15 @@ case 'ownermenu':
       case 'reviverqr':
         if (!isOwner) return reply('🚫 Este comando é exclusivo para o proprietário!');
         const qrcodeDir = pathz.join(__dirname, '..', 'database', 'qr-code');
-        const filePatterns = ['pre-key', 'sender', 'session'];
-        let totalDeleted = 0;
-        const deletedByCategory = {};
         try {
-          filePatterns.forEach(pattern => deletedByCategory[pattern] = 0);
-          const files = fs.readdirSync(qrcodeDir);
-          for (const file of files) {
-            for (const pattern of filePatterns) {
-              if (file.startsWith(pattern)) {
-                const filePath = pathz.join(qrcodeDir, file);
-                fs.unlinkSync(filePath);
-                deletedByCategory[pattern]++;
-                totalDeleted++;
-              }
-            }
-          }
-          let message = '🧹 Limpeza de arquivos concluída!\n\n';
-          
-          message += '📊 Arquivos excluídos por categoria:\n';
-          for (const [category, count] of Object.entries(deletedByCategory)) {
-            
-            message += `- ${category}: ${count} arquivo(s)\n`;
-          }
-          
-          message += `\n📈 Total de arquivos excluídos: ${totalDeleted}\n`;
-          
-          message += '🔄 Reiniciando o sistema em 2 segundos...';
-          reply(message);
-          setTimeout(() => {
-            reply('🔄 Reiniciando agora...');
-            setTimeout(() => {
-              process.exit();
-            }, 1200);
-          }, 2000);
+          await reply('⚠️ Vou apagar toda a autenticação salva do WhatsApp. O bot ficará desconectado e precisará ser pareado novamente pelo QR Code. Reiniciando...');
+          await new Promise(resolve => setTimeout(resolve, 1200));
+          // Um reset real precisa remover também creds.json e app-state-sync-*.json;
+          // apagar somente session/pre-key/sender deixa uma sessão Signal parcial.
+          fs.rmSync(qrcodeDir, { recursive: true, force: true });
+          fs.mkdirSync(qrcodeDir, { recursive: true });
+          console.log('🧹 Estado completo de autenticação removido; será necessário escanear um novo QR Code.');
+          process.exit(0);
         } catch (error) {
       // DEV_LOG_INSTRUMENTED: todos os erros capturados são enviados ao Dev.
       void enviarErroParaDev('captura-local', error, {
@@ -12949,7 +12994,7 @@ case 'ownermenu':
         from,
         command: typeof command !== 'undefined' ? command : null
       });
-          reply(`❌ Erro ao executar a limpeza: ${error.message}`);
+          await reply(`❌ Erro ao limpar a autenticação: ${error.message}`);
         }
         break;
       case 'cases':

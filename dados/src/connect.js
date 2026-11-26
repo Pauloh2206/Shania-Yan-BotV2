@@ -366,7 +366,7 @@ const logger = pino({
 const AUTH_DIR = path.join(__dirname, '..', 'database', 'qr-code');
 const DATABASE_DIR = path.join(__dirname, '..', 'database');
 const GLOBAL_BLACKLIST_PATH = path.join(__dirname, '..', 'database', 'dono', 'globalBlacklist.json');
-
+const groupMetadataCache = new NodeCache({ stdTTL: 300, useClones: false });
 let msgRetryCounterCache;
 let messagesCache;
 
@@ -1045,15 +1045,28 @@ async function createBotSocket(authDir) {
     try {
         await fsPromises.mkdir(path.join(DATABASE_DIR, 'grupos'), { recursive: true });
         await fsPromises.mkdir(authDir, { recursive: true });
-        const {
-            state,
-            saveCreds,
-            signalRepository
-        } = await useMultiFileAuthState(authDir, makeCacheableSignalKeyStore);
+        const { state, saveCreds } = await useMultiFileAuthState(authDir);
+        const auth = {
+            creds: state.creds,
+            keys: makeCacheableSignalKeyStore(state.keys, logger)
+        };
         // Não use a versão da branch master do GitHub: ela pode ser de outra
         // geração do protocolo e provocar fechamento 428 com este pacote.
         const { version } = await fetchLatestBaileysVersion();
-        const NazunaSock = makeWASocket({
+        groupMetadataCache.flushAll();
+        let NazunaSock;
+        const cachedGroupMetadata = async (jid) => {
+            const cached = groupMetadataCache.get(jid);
+            if (cached) return cached;
+            try {
+                const metadata = await NazunaSock.groupMetadata(jid);
+                if (metadata) groupMetadataCache.set(jid, metadata);
+                return metadata;
+            } catch {
+                return undefined;
+            }
+        };
+        NazunaSock = makeWASocket({
             version,
             browser: Browsers.ubuntu('Chrome'),
             markOnlineOnConnect: false,
@@ -1062,8 +1075,8 @@ async function createBotSocket(authDir) {
             qrTimeout: 180000,
             keepAliveIntervalMs: 30_000,
             msgRetryCounterCache,
-            auth: state,
-            signalRepository,
+            auth,
+            cachedGroupMetadata,
             logger
         });
 
@@ -1072,17 +1085,19 @@ async function createBotSocket(authDir) {
         NazunaSock.ev.on('groups.update', async (updates) => {
             if (!Array.isArray(updates) || updates.length === 0) return;
             
-            // Processa atualizações em lote para melhor performance
-            const updatePromises = updates.map(async ([ev]) => {
-                if (!ev || !ev.id) return;
+            // Invalida e recarrega o cache quando os metadados do grupo mudam.
+            const updatePromises = updates.map(async (update) => {
+                const groupId = update?.id;
+                if (!groupId) return;
+                groupMetadataCache.del(groupId);
                 
                 try {
-                    const meta = await NazunaSock.groupMetadata(ev.id).catch(() => null);
+                    const meta = await NazunaSock.groupMetadata(groupId).catch(() => null);
                     if (meta) {
-                        // Metadados atualizados, pode ser usado para cache futuro
+                        groupMetadataCache.set(groupId, meta);
                     }
                 } catch (e) {
-                    console.error(`❌ Erro ao atualizar metadados do grupo ${ev.id}: ${e.message}`);
+                    console.error(`❌ Erro ao atualizar metadados do grupo ${groupId}: ${e.message}`);
                 }
             });
             
@@ -1090,6 +1105,7 @@ async function createBotSocket(authDir) {
         });
 
         NazunaSock.ev.on('group-participants.update', async (inf) => {
+            if (inf?.id) groupMetadataCache.del(inf.id);
             await handleGroupParticipantsUpdate(NazunaSock, inf);
         });
 

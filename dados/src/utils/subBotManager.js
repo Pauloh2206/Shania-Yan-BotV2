@@ -149,13 +149,30 @@ async function initializeSubBot(botId, phoneNumber, ownerNumber, generatePairing
 
         const { config, dirs } = createSubBotConfig(botId, phoneNumber, ownerNumber);
         
-        const { state, saveCreds } = await useMultiFileAuthState(dirs.authDir, makeCacheableSignalKeyStore);
+        const { state, saveCreds } = await useMultiFileAuthState(dirs.authDir);
+        const auth = {
+            creds: state.creds,
+            keys: makeCacheableSignalKeyStore(state.keys, logger)
+        };
         // Mantém o protocolo compatível com a versão instalada do pacote.
         const { version } = await fetchLatestBaileysVersion();
 
         const msgRetryCounterCache = new NodeCache();
+        const groupMetadataCache = new NodeCache({ stdTTL: 300, useClones: false });
 
-        const sock = makeWASocket({
+        let sock;
+        const cachedGroupMetadata = async (jid) => {
+            const cached = groupMetadataCache.get(jid);
+            if (cached) return cached;
+            try {
+                const metadata = await sock.groupMetadata(jid);
+                if (metadata) groupMetadataCache.set(jid, metadata);
+                return metadata;
+            } catch {
+                return undefined;
+            }
+        };
+        sock = makeWASocket({
             version,
             logger,
             browser: ['Mac OS', 'Safari', '18.6'],
@@ -170,7 +187,8 @@ async function initializeSubBot(botId, phoneNumber, ownerNumber, generatePairing
             keepAliveIntervalMs: 30_000,
             defaultQueryTimeoutMs: undefined,
             msgRetryCounterCache,
-            auth: state,
+            auth,
+            cachedGroupMetadata,
         });
 
         let pairingCode = null;
@@ -205,6 +223,16 @@ async function initializeSubBot(botId, phoneNumber, ownerNumber, generatePairing
         }
 
         sock.ev.on('creds.update', saveCreds);
+
+        sock.ev.on('groups.update', (updates) => {
+            for (const update of updates || []) {
+                if (update?.id) groupMetadataCache.del(update.id);
+            }
+        });
+
+        sock.ev.on('group-participants.update', (update) => {
+            if (update?.id) groupMetadataCache.del(update.id);
+        });
 
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect } = update;

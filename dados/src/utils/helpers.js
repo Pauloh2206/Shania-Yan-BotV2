@@ -3,7 +3,16 @@ import pathz from 'path';
 
 // Cache global de JID → LID em memória (para acesso rápido)
 let jidLidMemoryCache = new Map();
+const jidLidNegativeCache = new Map();
 let jidLidCacheFile = null;
+
+function rememberJidLidMiss(jid, ttlMs) {
+  if (!jidLidNegativeCache.has(jid) && jidLidNegativeCache.size >= 5000) {
+    const oldestJid = jidLidNegativeCache.keys().next().value;
+    if (oldestJid) jidLidNegativeCache.delete(oldestJid);
+  }
+  jidLidNegativeCache.set(jid, Date.now() + ttlMs);
+}
 
 // Inicializa o caminho do cache
 function initJidLidCache(cacheFilePath) {
@@ -55,6 +64,13 @@ async function getLidFromJidCached(nazu, jid) {
     // Remove :XX se existir no cache
     return cachedLid.includes(':') ? cachedLid.split(':')[0] + '@lid' : cachedLid;
   }
+
+  // Evita repetir consultas para usuários sem LID em toda mensagem de grupo.
+  const negativeExpiresAt = jidLidNegativeCache.get(jid);
+  if (negativeExpiresAt && negativeExpiresAt > Date.now()) {
+    return jid;
+  }
+  if (negativeExpiresAt) jidLidNegativeCache.delete(jid);
   
   // 2. Se não está no cache, busca via API
   try {
@@ -69,6 +85,7 @@ async function getLidFromJidCached(nazu, jid) {
       
       // Salva no cache
       jidLidMemoryCache.set(jid, lid);
+      jidLidNegativeCache.delete(jid);
       
       // Salva em disco (debounced - a cada 10 novos)
       if (jidLidMemoryCache.size % 10 === 0) {
@@ -77,7 +94,15 @@ async function getLidFromJidCached(nazu, jid) {
       
       return lid;
     }
+    // Resultado válido sem LID: revalida periodicamente, não em toda mensagem.
+    if (Array.isArray(result)) {
+      rememberJidLidMiss(jid, 10 * 60 * 1000);
+    } else {
+      // Resposta ausente pode ser transitória; aplica apenas um backoff curto.
+      rememberJidLidMiss(jid, 30 * 1000);
+    }
   } catch (error) {
+    rememberJidLidMiss(jid, 30 * 1000);
     console.warn(`⚠️ Erro ao buscar LID para ${jid}: ${error.message}`);
   }
   
